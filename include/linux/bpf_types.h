@@ -36,7 +36,7 @@ BPF_PROG_TYPE(BPF_PROG_TYPE_LIRC_MODE2, lirc_mode2)
 BPF_PROG_TYPE(BPF_PROG_TYPE_SK_REUSEPORT, sk_reuseport)
 #endif
 #ifdef CONFIG_FUSE_BPF
-BPF_PROG_TYPE(BPF_PROG_TYPE_FUSE, fuse, struct fuse_args, struct fuse_args)
+BPF_PROG_TYPE(BPF_PROG_TYPE_FUSE, fuse, struct fuse_bpf_args, struct fuse_bpf_args)
 #endif
 
 BPF_PROG_TYPE(BPF_PROG_TYPE_FLOW_DISSECTOR, flow_dissector)
