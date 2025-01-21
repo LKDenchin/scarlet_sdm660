@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/err.h>
@@ -310,7 +310,7 @@ static int modem_notifier_cb(struct notifier_block *this, unsigned long code,
 	case SUBSYS_BEFORE_SHUTDOWN:
 		bootup_request++;
 		dev_info(memsh_drv->dev,
-		"memshare: SUBSYS_BEFORE_SHUTDOWN: bootup_request:%lld\n",
+		"memshare: SUBSYS_BEFORE_SHUTDOWN: bootup_request:%d\n",
 		bootup_request);
 		for (i = 0; i < MAX_CLIENTS; i++)
 			memblock[i].alloc_request = 0;
@@ -412,7 +412,7 @@ static int modem_notifier_cb(struct notifier_block *this, unsigned long code,
 	}
 	mutex_unlock(&memsh_drv->mem_share);
 	dev_info(memsh_drv->dev,
-	"memshare: notifier_cb processed for code: %ld\n", code);
+	"memshare: notifier_cb processed for code: %d\n", code);
 	return NOTIFY_DONE;
 }
 
@@ -481,8 +481,11 @@ static void handle_alloc_generic_req(struct qmi_handle *handle,
 		return;
 	}
 
-	if (!memblock[client_id].allotted) {
-		if (memblock[client_id].guard_band && alloc_req->num_bytes > 0)
+	if (!memblock[client_id].allotted && alloc_req->num_bytes > 0) {
+		if (alloc_req->num_bytes > memblock[client_id].init_size)
+			alloc_req->num_bytes = memblock[client_id].init_size;
+
+		if (memblock[client_id].guard_band)
 			size = alloc_req->num_bytes + MEMSHARE_GUARD_BYTES;
 		else
 			size = alloc_req->num_bytes;
