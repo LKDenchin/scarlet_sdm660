@@ -1,0 +1,23 @@
+name: Cherry-pick from another repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit-hash: { description: "1d712911e65386a95409a76383de97e88d979d00" }
+      target-repo: { description: "https://github.com/LKDenchin/kernel_rova_bpf" }
+
+jobs:
+  cherry-pick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout your repository
+        uses: actions/checkout@v4
+
+      - name: Add remote repository
+        run: git remote add other-repo ${target-repo}
+
+      - name: Fetch the target commit
+        run: git fetch other-repo main
+
+      - name: Cherry-pick the commit
+        run: git cherry-pick ${commit-hash}
