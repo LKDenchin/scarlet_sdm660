@@ -4,19 +4,20 @@ on:
     inputs:
       commit-hash: { description: "目标提交的哈希值" }
       target-repo: { description: "目标仓库的URL" }
+      target-branch: { description: "目标仓库的分支名称", default: "main" }
 
 jobs:
   cherry-pick:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout your repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Add remote repository
         run: git remote add other-repo ${target-repo}
 
       - name: Fetch the target commit
-        run: git fetch other-repo main
+        run: git fetch other-repo ${target-branch}
 
       - name: Cherry-pick the commit
         run: git cherry-pick ${commit-hash}
