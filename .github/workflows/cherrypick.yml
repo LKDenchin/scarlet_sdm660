@@ -1,44 +1,95 @@
-name: Cherry-pick Merge Commit
+name: 拉取提交
 
 on:
   workflow_dispatch:
     inputs:
-      commit-hash: { description: "目标合并提交的哈希值", required: true }
-      target-repo: { description: "目标仓库的URL（格式：owner/repo）", required: true }
+      commit-hash: { description: "目标提交的哈希值" }
+      target-repo: { description: "目标仓库的URL（格式：owner/repo）" }
       target-branch: { description: "目标仓库的分支名称", default: "main" }
+      username: { description: "GitHub用户名" }
+      password: { description: "GitHub密码", required: false }
+      use-pat: { description: "是否使用PAT认证", default: "false" }
 
 jobs:
   cherry-pick:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout your repository
+      - name: Checkout仓库（完整历史）
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 拉取完整提交历史以解决复杂冲突
 
-      - name: Debug inputs
+      - name: 验证输入格式
+        run: |
+          # 检查target-repo格式是否为owner/repo
+          if [[ ! "${{ github.event.inputs.target-repo }}" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+$ ]]; then
+            echo "::error::仓库格式错误！请使用 'owner/repo' 格式"
+            exit 1
+          fi
+
+          # 检查commit-hash是否为40位哈希
+          if [[ ! "${{ github.event.inputs.commit-hash }}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::提交哈希格式无效"
+            exit 1
+          fi
+
+      - name: 调试输入参数
         run: |
           echo "目标仓库: ${{ github.event.inputs.target-repo }}"
           echo "目标分支: ${{ github.event.inputs.target-branch }}"
           echo "提交哈希: ${{ github.event.inputs.commit-hash }}"
+          echo "使用PAT: ${{ github.event.inputs.use-pat }}"
 
-      - name: Add remote repository with auth
+      - name: 配置Git身份
         run: |
-          git remote add other-repo "https://${{ secrets.PAT }}@github.com/${{ github.event.inputs.target-repo }}.git"
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
 
-      - name: Check remote accessibility
-        run: git ls-remote --heads other-repo "${{ github.event.inputs.target-branch }}"
+      - name: 添加远程仓库
+        run: |
+          git remote remove other-repo || true  # 防止重复添加
 
-      - name: Fetch the target commit
+          if [ "${{ github.event.inputs.use-pat }}" = "true" ]; then
+            git remote add other-repo "https://${{ secrets.PAT }}@github.com/${{ github.event.inputs.target-repo }}.git"
+          else
+            git remote add other-repo "https://${{ github.event.inputs.username }}:${{ github.event.inputs.password }}@github.com/${{ github.event.inputs.target-repo }}.git"
+          fi
+
+      - name: 验证远程分支存在性
+        run: |
+          if ! git ls-remote --exit-code --heads other-repo "${{ github.event.inputs.target-branch }}"; then
+            echo "::error::目标分支不存在或无权访问"
+            exit 1
+          fi
+
+      - name: 拉取目标提交（带调试）
         run: |
           export GIT_TRACE=1
           git fetch --progress other-repo "${{ github.event.inputs.target-branch }}"
 
-      - name: Cherry-pick merge commit
+      - name: 安全Cherry-pick提交
         run: |
-          # 使用第一个父提交的更改
-          git cherry-pick -m 1 "${{ github.event.inputs.commit-hash }}"
-          # 如果存在冲突，尝试自动解决
-          || (git checkout --theirs . && git add . && git cherry-pick --continue)
+          set -x  # 启用命令回显
+          git cherry-pick -m 1 "${{ github.event.inputs.commit-hash }}" || {
+            echo "::warning::检测到代码冲突，尝试自动解决..."
+            
+            # 尝试接受目标提交的修改
+            git checkout --theirs . && git add .
+            
+            # 继续Cherry-pick
+            if ! git cherry-pick --continue; then
+              echo "::warning::无法自动解决所有冲突，继续处理..."
+              git status --porcelain
+              git diff --name-only --diff-filter=U
+              echo "::warning::请检查上述冲突文件并手动解决后继续操作"
+              exit 1
+            fi
+          }
+          echo "✅ 成功应用提交"
 
-      - name: Push changes
+      - name: 推送变更（可选）
+        if: success()
         run: |
-          git push origin "${{ github.event.inputs.target-branch }}"
+          # 使用强制推送以覆盖目标分支
+          git push --force-with-lease origin HEAD:$(git branch --show-current)
+          echo "✅ 成功推送变更到目标分支"
