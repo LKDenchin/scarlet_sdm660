@@ -10,6 +10,12 @@ jobs:
   cherry-pick:
     runs-on: ubuntu-latest
     steps:
+      - name: Setup environment
+        run: |
+          echo "commit-hash=${{ github.event.inputs.commit-hash }}" >> $GITHUB_ENV
+          echo "target-repo=${{ github.event.inputs.target-repo }}" >> $GITHUB_ENV
+          echo "target-branch=${{ github.event.inputs.target-branch }}" >> $GITHUB_ENV
+
       - name: Checkout your repository
         uses: actions/checkout@v4
 
