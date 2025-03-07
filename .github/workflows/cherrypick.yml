@@ -14,10 +14,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Add remote repository
-        run: git remote add other-repo ${target-repo}
+        run: git remote add other-repo "${{ github.event.inputs.target-repo }}.git"  # 确保URL以.git结尾
 
       - name: Fetch the target commit
-        run: git fetch other-repo ${target-branch}
+        run: git fetch other-repo "${{ github.event.inputs.targetbranch }}"  # 正确引用输入参数
 
       - name: Cherry-pick the commit
-        run: git cherry-pick ${commit-hash}
+        run: git cherry-pick "${{ github.event.inputs.commit-hash }}"
