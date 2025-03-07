@@ -87,4 +87,4 @@ jobs:
         if: success()
         run: |
           # 使用强制推送以覆盖目标分支
-          git push --force-with-lease origin HEAD:$(git branch
+          git push --force-with-lease origin HEAD:"${{ github.event.inputs.target-branch }}"
