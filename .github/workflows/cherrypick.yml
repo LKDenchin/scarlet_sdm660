@@ -1,9 +1,10 @@
-name: 拉取提交
+name: Cherry-pick Merge Commit
+
 on:
   workflow_dispatch:
     inputs:
-      commit-hash: { description: "目标提交的哈希值" }
-      target-repo: { description: "目标仓库的URL（格式：owner/repo）" }
+      commit-hash: { description: "目标合并提交的哈希值", required: true }
+      target-repo: { description: "目标仓库的URL（格式：owner/repo）", required: true }
       target-branch: { description: "目标仓库的分支名称", default: "main" }
 
 jobs:
@@ -13,17 +14,31 @@ jobs:
       - name: Checkout your repository
         uses: actions/checkout@v4
 
+      - name: Debug inputs
+        run: |
+          echo "目标仓库: ${{ github.event.inputs.target-repo }}"
+          echo "目标分支: ${{ github.event.inputs.target-branch }}"
+          echo "提交哈希: ${{ github.event.inputs.commit-hash }}"
+
       - name: Add remote repository with auth
         run: |
           git remote add other-repo "https://${{ secrets.PAT }}@github.com/${{ github.event.inputs.target-repo }}.git"
 
-      - name: Fetch the target branch
-        run: git fetch other-repo "${{ github.event.inputs.target-branch }}"
+      - name: Check remote accessibility
+        run: git ls-remote --heads other-repo "${{ github.event.inputs.target-branch }}"
+
+      - name: Fetch the target commit
+        run: |
+          export GIT_TRACE=1
+          git fetch --progress other-repo "${{ github.event.inputs.target-branch }}"
 
       - name: Cherry-pick merge commit
         run: |
-          # 明确指定父节点编号（通常为1）
+          # 使用第一个父提交的更改
           git cherry-pick -m 1 "${{ github.event.inputs.commit-hash }}"
+          # 如果存在冲突，尝试自动解决
+          || (git checkout --theirs . && git add . && git cherry-pick --continue)
 
-          # 如果存在冲突，可添加自动中止逻辑
-          # || (git cherry-pick --abort && exit 1)
+      - name: Push changes
+        run: |
+          git push origin "${{ github.event.inputs.target-branch }}"
