@@ -41,8 +41,9 @@ jobs:
           git remote add other-repo "https://${{ inputs.target-repo }}.git"
 
       - name: 拉取目标分支
-        run: git fetch --progress other-repo "${{ inputs.target-branch }}"
-             git fetch --progress other-repo "${{ inputs.target-commit }}" 
+        run: |
+           git fetch --progress other-repo "${{ inputs.target-branch }}"
+           git fetch --progress other-repo "${{ inputs.target-commit }}" 
 
       - name: 处理提交
         run: |
