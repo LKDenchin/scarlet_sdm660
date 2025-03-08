@@ -32,7 +32,7 @@ jobs:
     - name: 检出仓库
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
+        fetch-depth: 1
 
     - name: 验证输入格式
       run: |
@@ -130,6 +130,17 @@ jobs:
         # 提交变更到主分支
         git push origin HEAD:main
 
+        # 运行测试
+        if ! ./scripts/run_tests.sh; then
+          echo "测试失败，回滚变更..."
+          git checkout -
+          git branch -D "merge-processor/$commit_hash"
+          exit 1
+        fi
+
+        # 记录成功合并
+        echo "成功合并提交 $commit_hash 到 main 分支。"
+
     - name: 创建PR处理冲突
       if: steps.merge-processor.outputs.conflict-files != ''
       uses: peter-evans/create-pull-request@v4
@@ -138,9 +149,24 @@ jobs:
         body: "自动合并提交时遇到冲突，已尝试自动解决。如自动解决失败，请手动处理冲突文件：${{ steps.merge-processor.outputs.conflict-files }}。"
         branch: "merge-conflict/${{ inputs.commit-hash }}"
         delete-branch: true
+        labels: "需要处理, 合并冲突"
+        assignees: "admin"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: 清理认证信息
       if: always()
       run: rm -f ~/.git-credentials
+
+    - name: 发送通知
+      if: steps.merge-processor.outputs.conflict-files != '' || steps.submit-changes.status() == 'success'
+      uses: dawidd6/action-send-notification@v3
+      with:
+        title: "合并提交结果通知"
+        message: |
+          提交哈希: ${{ inputs.commit-hash }}
+          目标分支: ${{ inputs.target-branch }}
+          状态: ${{ steps.submit-changes.status() }}
+          冲突文件: ${{ steps.merge-processor.outputs.conflict-files }}
+        method: slack
+        webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
