@@ -124,6 +124,7 @@ jobs:
         git push origin "merge-processor/$commit_hash"
 
     - name: 提交有效变更
+      id: submit-changes
       if: steps.merge-processor.outputs.conflict-files == ''
       run: |
         commit_hash=${{ inputs.commit-hash }}
@@ -142,8 +143,9 @@ jobs:
         echo "成功合并提交 $commit_hash 到 main 分支。"
 
     - name: 创建PR处理冲突
-      if: steps.merge-processor.outputs.conflict-files != ''
+      id: create-pr-for-conflicts
       uses: peter-evans/create-pull-request@v4
+      if: steps.merge-processor.outputs.conflict-files != ''
       with:
         title: "[需要处理] 合并冲突 - ${{ inputs.commit-hash }}"
         body: "自动合并提交时遇到冲突，已尝试自动解决。如自动解决失败，请手动处理冲突文件：${{ steps.merge-processor.outputs.conflict-files }}。"
@@ -155,12 +157,14 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: 清理认证信息
-      if: always()
+      id: clean-up
       run: rm -f ~/.git-credentials
+      if: always()
 
     - name: 发送通知
-      if: steps.merge-processor.outputs.conflict-files != '' || steps.submit-changes.status() == 'success'
+      id: send-notification
       uses: dawidd6/action-send-notification@v3
+      if: steps.submit-changes.outputs.conflict-files == '' || steps.submit-changes.status() == 'success'
       with:
         title: "合并提交结果通知"
         message: |
