@@ -24,28 +24,23 @@ jobs:
   smart-merge:
     runs-on: ubuntu-latest
     steps:
-      # ================= 初始化阶段 =================
       - name: 检出仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ================= 输入验证 =================
       - name: 验证输入格式
         run: |
-          # 仓库名格式校验（允许大小写）
           if [[ ! "${{ inputs.target-repo }}" =~ ^[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$ ]]; then
             echo "::error::仓库格式错误！示例：LKDenchin/kernel_rova_bpf"
             exit 1
           fi
 
-          # 提交哈希格式校验
           if [[ ! "${{ inputs.commit-hash }}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::提交哈希格式错误！需要40位小写十六进制"
             exit 1
           fi
 
-      # ================= 安全配置 =================
       - name: 配置Git身份
         run: |
           git config --global user.name "GitHub Merge Bot"
@@ -58,7 +53,6 @@ jobs:
           chmod 600 ~/.git-credentials
           git config --global credential.helper 'store --file ~/.git-credentials'
 
-      # ================= 合并核心逻辑 =================
       - name: 添加远程仓库
         run: |
           git remote remove upstream 2>/dev/null || true
@@ -72,22 +66,18 @@ jobs:
       - name: 智能合并处理
         id: merge-processor
         run: |
-          # 检测是否为合并提交
           parents=$(git show -s --format=%P ${{ inputs.commit-hash }})
           parent_count=$(echo $parents | wc -w)
 
-          # 执行合并操作
           if [ $parent_count -eq 2 ]; then
             git cherry-pick -m 1 -n ${{ inputs.commit-hash }}
           else
             git cherry-pick -n ${{ inputs.commit-hash }}
           fi
 
-          # 捕获冲突文件列表
           conflict_files=$(git diff --name-only --diff-filter=U | tr '\n' ',' | sed 's/,$//')
           remaining_files=$(git diff --cached --name-only | wc -l)
 
-          # 清理冲突状态
           if [ -n "$conflict_files" ]; then
             git reset .
             git restore --source=HEAD --staged --worktree -- .
@@ -97,54 +87,24 @@ jobs:
           echo "conflict_files=$conflict_files" >> $GITHUB_OUTPUT
           echo "remaining=$remaining_files" >> $GITHUB_OUTPUT
 
-      # ================= 结果处理 =================
       - name: 提交有效变更
         if: steps.merge-processor.outputs.remaining > 0
         run: |
           git commit -m "[智能合并] ${{ inputs.commit-hash }} from ${{ inputs.target-repo }}"
           git push origin HEAD
 
-      - name: 生成冲突报告
-        if: steps.merge-processor.outputs.conflict_files != ''
-        run: |
-          echo "### 🚨 合并冲突报告" >> $GITHUB_STEP_SUMMARY
-          echo "**目标提交**: [${{ inputs.commit-hash }}](https://github.com/${{ inputs.target-repo }}/commit/${{ inputs.commit-hash }})" >> $GITHUB_STEP_SUMMARY
-          echo "**冲突文件**: " >> $GITHUB_STEP_SUMMARY
-          
-          # 生成Markdown列表
-          echo "${{ steps.merge-processor.outputs.conflict_files }}" | tr ',' '\n' | while read file; do
-            echo "- \`$file\`" >> $GITHUB_STEP_SUMMARY
-          done
-
-      - name: 创建冲突处理PR
+      - name: 创建PR
         if: steps.merge-processor.outputs.conflict_files != ''
         uses: peter-evans/create-pull-request@v4
         with:
           title: "[需要处理] 合并冲突 - ${{ inputs.commit-hash }}"
-          body: |
-            ## 检测到合并冲突
-
-            **来源仓库**: [${{ inputs.target-repo }}](https://github.com/${{ inputs.target-repo }})
-            **目标提交**: [${{ inputs.commit-hash }}](https://github.com/${{ inputs.target-repo }}/commit/${{ inputs.commit-hash }})
-
-            ### 需要处理的冲突文件
-            ${{ steps.merge-processor.outputs.conflict_files | replace(',', '\n- `') | prepend('- `') }}
-            
-            ### 解决指南
-            1. 检出本分支:
-               ```bash
-               git fetch origin
-               git checkout ${{ env.PR_BRANCH }}
-               ```
-            2. 使用合并工具解决冲突
-            3. 推送修改并合并本PR
+          body: "自动合并提交"
           branch: "merge-conflict/${{ inputs.commit-hash }}"
           delete-branch: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_BRANCH: "merge-conflict/${{ inputs.commit-hash }}"
 
-      # ================= 清理阶段 =================
       - name: 清理认证信息
         if: always()
         run: rm -f ~/.git-credentials
