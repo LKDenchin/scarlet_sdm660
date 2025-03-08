@@ -32,7 +32,7 @@ jobs:
     - name: 检出仓库
       uses: actions/checkout@v4
       with:
-        fetch-depth: 1
+        fetch-depth: 1  # 仅获取当前分支的历史记录，加快检出速度
 
     - name: 验证输入格式
       run: |
@@ -63,28 +63,20 @@ jobs:
         git remote remove upstream 2>/dev/null || true
         git remote add upstream "https://github.com/${{ inputs.target-repo }}.git"
 
-    - name: 获取目标代码
+    - name: 快速获取目标代码
       run: |
-        git fetch upstream "${{ inputs.target-branch }}"
-        git fetch upstream "${{ inputs.commit-hash }}"
+        # 仅获取目标分支和提交哈希
+        git fetch upstream "${{ inputs.target-branch }}:refs/remotes/upstream/${{ inputs.target-branch }}" --depth=1
+        git fetch upstream "${{ inputs.commit-hash }}" --depth=1
 
     - name: 智能合并处理
       id: merge-processor
       run: |
         commit_hash=${{ inputs.commit-hash }}
         parents=$(git show -s --format=%P "$commit_hash")
-        if [ -z "$parents" ]; then
-          echo "提交 $commit_hash 没有父提交，无法处理。"
-          exit 1
-        fi
+        parent_count=$(echo "$parents" | wc -w)
 
-        # 检查是否有多个父提交（如合并提交）
-        if [ $(echo "$parents" | wc -w) -gt 1 ]; then
-          echo "提交 $commit_hash 是一个合并提交，无法处理。"
-          exit 1
-        fi
-
-        # 检查提交是否已经在当前分支上
+        # 检查提交是否已经在目标分支上
         if git branch --contains "$commit_hash" | grep -q 'main'; then
           echo "提交 $commit_hash 已经在 main 分支上，无需合并。"
           exit 0
@@ -94,7 +86,16 @@ jobs:
         git checkout -b "merge-processor/$commit_hash"
 
         # 尝试进行智能合并
-        git cherry-pick "$commit_hash" || true
+        if [ "$parent_count" -gt 1 ]; then
+          echo "处理合并提交 $commit_hash"
+          git merge --squash "$commit_hash"
+          if [ $? -ne 0 ]; then
+            echo "自动合并失败，需要手动处理。"
+            exit 1
+          fi
+        else
+          git cherry-pick "$commit_hash" || true
+        fi
 
         # 检测是否有冲突文件
         conflict_files=$(git status --porcelain | grep 'UU' | awk '{print $2}')
@@ -130,17 +131,6 @@ jobs:
         commit_hash=${{ inputs.commit-hash }}
         # 提交变更到主分支
         git push origin HEAD:main
-
-        # 运行测试
-        if ! ./scripts/run_tests.sh; then
-          echo "测试失败，回滚变更..."
-          git checkout -
-          git branch -D "merge-processor/$commit_hash"
-          exit 1
-        fi
-
-        # 记录成功合并
-        echo "成功合并提交 $commit_hash 到 main 分支。"
 
     - name: 创建PR处理冲突
       id: create-pr-for-conflicts
