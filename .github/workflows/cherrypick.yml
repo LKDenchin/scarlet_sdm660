@@ -66,43 +66,75 @@ jobs:
       - name: 智能合并处理
         id: merge-processor
         run: |
-          parents=$(git show -s --format=%P ${{ inputs.commit-hash }})
-          parent_count=$(echo $parents | wc -w)
+         commit_hash=${{ inputs.commit-hash }}
+         parents=$(git show -s --format=%P "$commit_hash")
+         if [ -z "$parents" ]; then
+           echo "提交 $commit_hash 没有父提交，无法处理。"
+          exit 1
+         fi
 
-          if [ $parent_count -eq 2 ]; then
-            git cherry-pick -m 1 -n ${{ inputs.commit-hash }}
-          else
-            git cherry-pick -n ${{ inputs.commit-hash }}
-          fi
+        # 检查是否有多个父提交（如合并提交）
+          if [ $(echo "$parents" | wc -w) -gt 1 ]; then
+            echo "提交 $commit_hash 是一个合并提交，无法处理。"
+          exit 1
+         fi
 
-          conflict_files=$(git diff --name-only --diff-filter=U | tr '\n' ',' | sed 's/,$//')
-          remaining_files=$(git diff --cached --name-only | wc -l)
+        # 检查提交是否已经在当前分支上
+        if git branch --contains "$commit_hash" | grep -q 'main'; then
+          echo "提交 $commit_hash 已经在 main 分支上，无需合并。"
+          exit 0
+        fi
 
-          if [ -n "$conflict_files" ]; then
-            git reset .
-            git restore --source=HEAD --staged --worktree -- .
-            git cherry-pick --quit
-          fi
+        # 创建新的分支进行处理
+        git checkout -b "merge-processor/$commit_hash"
 
-          echo "conflict_files=$conflict_files" >> $GITHUB_OUTPUT
-          echo "remaining=$remaining_files" >> $GITHUB_OUTPUT
+        # 尝试进行智能合并
+        git cherry-pick "$commit_hash" || true
 
-      - name: 提交有效变更
-        if: steps.merge-processor.outputs.remaining > 0
-        run: |
-          git commit -m "[智能合并] ${{ inputs.commit-hash }} from ${{ inputs.target-repo }}"
-          git push origin HEAD
+        # 检测是否有冲突文件
+        conflict_files=$(git status --porcelain | grep 'UU' | awk '{print $2}')
 
-      - name: 创建PR
-        if: steps.merge-processor.outputs.conflict_files != ''
-        uses: peter-evans/create-pull-request@v4
-        with:
-          title: "[需要处理] 合并冲突 - ${{ inputs.commit-hash }}"
-          body: "自动合并提交"
-          branch: "merge-conflict/${{ inputs.commit-hash }}"
-          delete-branch: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if [ -n "$conflict_files" ]; then
+          echo "检测到冲突文件：$conflict_files"
+          echo "conflict-files=$conflict_files" >> $GITHUB_OUTPUT
+
+          # 尝试自动解决冲突
+          for file in $conflict_files; do
+            echo "尝试解决冲突文件：$file"
+            git checkout --theirs -- "$file"
+            git add "$file"
+          done
+
+          # 提交解决后的变更
+          git commit -m "自动解决合并冲突"
+
+          # 记录冲突文件
+          echo "已记录冲突文件：$conflict_files" >> $GITHUB_OUTPUT
+        else
+          echo "没有检测到冲突文件。" >> $GITHUB_OUTPUT
+          echo "conflict-files=" >> $GITHUB_OUTPUT
+        fi
+
+        # 提交合并结果
+        git push origin "merge-processor/$commit_hash"
+
+    - name: 提交有效变更
+      if: steps.merge-processor.outputs.conflict-files == ''
+      run: |
+        commit_hash=${{ inputs.commit-hash }}
+        # 提交变更到主分支
+        git push origin HEAD:main
+
+    - name: 创建PR处理冲突
+      if: steps.merge-processor.outputs.conflict-files != ''
+      uses: peter-evans/create-pull-request@v4
+      with:
+        title: "[需要处理] 合并冲突 - ${{ inputs.commit-hash }}"
+        body: "自动合并提交时遇到冲突，已尝试自动解决。如自动解决失败，请手动处理冲突文件：${{ steps.merge-processor.outputs.conflict-files }}。"
+        branch: "merge-conflict/${{ inputs.commit-hash }}"
+        delete-branch: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_BRANCH: "merge-conflict/${{ inputs.commit-hash }}"
 
       - name: 清理认证信息
