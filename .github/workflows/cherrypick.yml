@@ -60,7 +60,18 @@ jobs:
           git fetch other-repo "${{ inputs.commit-hash }}"
 
       - name: 拆解提交到工作区
-        run: git cherry-pick -n "${{ inputs.commit-hash }}"
+        run: |
+          # 检测是否为合并提交
+          parents=$(git show --no-patch --format="%P" ${{ inputs.commit-hash }})
+          parent_count=$(echo $parents | wc -w)
+          
+          if [ $parent_count -eq 2 ]; then
+            echo "🔀 检测到合并提交，使用 -m 1 选项"
+            git cherry-pick -m 1 -n ${{ inputs.commit-hash }}
+          else
+            echo "⚡ 普通提交处理"
+            git cherry-pick -n ${{ inputs.commit-hash }}
+          fi
 
       - name: 智能冲突处理
         id: conflict-detector
