@@ -1,5 +1,4 @@
-name: Smart Partial Merge with Conflict Tracking
-
+name: 合并提交+自动PR
 on:
   workflow_dispatch:
     inputs:
