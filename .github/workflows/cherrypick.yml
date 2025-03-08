@@ -160,17 +160,3 @@ jobs:
       id: clean-up
       run: rm -f ~/.git-credentials
       if: always()
-
-    - name: 发送通知
-      id: send-notification
-      uses: dawidd6/action-send-notification@v3
-      if: steps.submit-changes.status == 'success' || steps.merge-processor.outputs.conflict-files != ''
-      with:
-        title: "合并提交结果通知"
-        message: |
-          提交哈希: ${{ inputs.commit-hash }}
-          目标分支: ${{ inputs.target-branch }}
-          状态: ${{ steps.submit-changes.status }}
-          冲突文件: ${{ steps.merge-processor.outputs.conflict-files }}
-        method: slack
-        webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
