@@ -129,8 +129,28 @@ jobs:
       if: steps.merge-processor.outputs.conflict-files == ''
       run: |
         commit_hash=${{ inputs.commit-hash }}
-        # 提交变更到主分支
-        git push origin HEAD:main
+        
+        # 检查本地分支状态
+        git status --porcelain
+        git log --oneline -n 3
+        
+        # 配置安全推送参数
+        git config --global push.default current
+        
+        # 使用强制推送（仅在无冲突时）
+        if git push origin "merge-processor/$commit_hash:main" --force-with-lease; then
+          echo "::notice::成功合并提交 $commit_hash 到 main 分支"
+        else
+          # 处理可能的非快进更新
+          echo "::warning::尝试非快进合并..."
+          git checkout main
+          git merge --no-ff "merge-processor/$commit_hash" -m "合并提交 $commit_hash"
+          git push origin main
+        fi
+        
+        # 清理临时分支
+        git branch -D "merge-processor/$commit_hash"
+        git push origin --delete "merge-processor/$commit_hash" || true
 
     - name: 创建PR处理冲突
       id: create-pr-for-conflicts
