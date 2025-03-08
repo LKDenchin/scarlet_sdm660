@@ -1,36 +1,57 @@
-name: 合并提交+自动PR
+name: Smart Partial Merge with Conflict Tracking
+
 on:
   workflow_dispatch:
     inputs:
-      commit-hash: 
-        description: "目标提交哈希值（40位小写）"
+      commit-hash:
+        description: "目标提交哈希 (40位小写)"
         required: true
-      target-repo: 
-        description: "目标仓库（格式：owner/repo）"
+      target-repo:
+        description: "目标仓库 (格式：owner/repo)"
         required: true
-      target-branch: 
+      target-branch:
         description: "目标分支"
         default: "main"
-      git-username: 
+      git-username:
         description: "GitHub用户名"
         required: true
-      git-password: 
+      git-password:
         description: "GitHub密码/PAT"
         required: true
         sensitive: true
 
 jobs:
-  partial-merge:
+  smart-merge:
     runs-on: ubuntu-latest
     steps:
-      # ================= 初始化阶段 =================
-      - name: 检出仓库（完整历史）
+      # ================ 初始化阶段 ================
+      - name: 检出仓库 (完整历史)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ================= 缓存加速 =================
-      - name: 缓存Git对象
+      # ================ 输入验证 ================
+      - name: 验证输入格式
+        run: |
+          if [[ ! "${{ inputs.target-repo }}" =~ ^[a-z0-9_-]+\/[a-z0-9_-]+$ ]]; then
+            echo "::error::仓库格式错误！示例：LKDenchin/kernel_rova_bpf"
+            exit 1
+          fi
+
+          if [[ ! "${{ inputs.commit-hash }}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::提交哈希格式错误！需要40位小写十六进制"
+            exit 1
+          fi
+
+      # ================ 配置环境 ================
+      - name: 配置安全认证
+        run: |
+          set +x
+          git config --global credential.helper 'store'
+          echo "https://${{ inputs.git-username }}:${{ inputs.git-password }}@github.com" > ~/.git-credentials
+          chmod 600 ~/.git-credentials
+
+      - name: 缓存加速
         uses: actions/cache@v3
         with:
           path: |
@@ -40,72 +61,89 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gitcache-
 
-      # ================= 安全配置 =================
-      - name: 配置安全认证
-        run: |
-          set +x
-          git config --global credential.helper 'store'
-          echo "https://${{ inputs.git-username }}:${{ inputs.git-password }}@github.com" > ~/.git-credentials
-          chmod 600 ~/.git-credentials
-
-      # ================= 核心合并逻辑 =================
-      - name: 添加动态远程仓库
+      # ================ 核心逻辑 ================
+      - name: 配置远程仓库
         run: |
           git remote remove other-repo 2>/dev/null || true
           git remote add other-repo "https://github.com/${{ inputs.target-repo }}.git"
 
       - name: 拉取目标代码
         run: |
-          git fetch other-repo "${{ inputs.target-branch }}"
-          git fetch other-repo "${{ inputs.commit-hash }}"
+          git fetch other-repo ${{ inputs.target-branch }}
+          git fetch other-repo ${{ inputs.commit-hash }}
+
+      - name: 分析提交类型
+        id: commit-analysis
+        run: |
+          parents=$(git show -s --format=%P ${{ inputs.commit-hash }})
+          parent_count=$(echo $parents | wc -w)
+          echo "parent_count=$parent_count" >> $GITHUB_OUTPUT
 
       - name: 拆解提交到工作区
         run: |
-          # 检测是否为合并提交
-          parents=$(git show --no-patch --format="%P" ${{ inputs.commit-hash }})
-          parent_count=$(echo $parents | wc -w)
-          
-          if [ $parent_count -eq 2 ]; then
-            echo "🔀 检测到合并提交，使用 -m 1 选项"
+          if [ "${{ steps.commit-analysis.outputs.parent_count }}" -eq 2 ]; then
+            echo "处理合并提交..."
             git cherry-pick -m 1 -n ${{ inputs.commit-hash }}
           else
-            echo "⚡ 普通提交处理"
+            echo "处理普通提交..."
             git cherry-pick -n ${{ inputs.commit-hash }}
           fi
 
-      - name: 智能冲突处理
-        id: conflict-detector
+      # ================ 冲突处理 ================
+      - name: 智能冲突解决
+        id: conflict-handler
         run: |
+          # 捕获冲突文件
           conflict_files=$(git diff --name-only --diff-filter=U | tr '\n' ',' | sed 's/,$//')
+          
           if [ -n "$conflict_files" ]; then
-            echo "conflict_detected=true" >> $GITHUB_OUTPUT
-            echo "conflict_files=$conflict_files" >> $GITHUB_OUTPUT
-            git restore --source=HEAD --staged --worktree -- $(echo $conflict_files | tr ',' ' ')
+            echo "::warning::检测到冲突文件：${conflict_files//,/，}"
+            
+            # 清理冲突状态
+            git reset .
+            git checkout -- .
+            git clean -fd
+            git cherry-pick --quit
+            
+            # 重新应用非冲突修改
+            git -c core.editor=true cherry-pick -n ${{ inputs.commit-hash }}
+            git reset $(git diff --cached --name-only | xargs)
           fi
 
+          # 统计有效变更
           remaining=$(git diff --cached --name-only | wc -l)
+          echo "conflict_files=$conflict_files" >> $GITHUB_OUTPUT
           echo "remaining=$remaining" >> $GITHUB_OUTPUT
 
-      # ================= 提交逻辑 =================
+      # ================ 结果处理 ================
       - name: 提交有效变更
-        if: steps.conflict-detector.outputs.remaining > 0
+        if: steps.conflict-handler.outputs.remaining > 0
         run: |
-          git commit -m "[Auto] 部分合并 ${{ inputs.commit-hash }}"
+          git commit -m "[智能合并] ${{ inputs.commit-hash }} from ${{ inputs.target-repo }}"
           git push origin HEAD
 
-      # ================= PR自动化 =================
       - name: 创建冲突跟踪PR
-        if: steps.conflict-detector.outputs.conflict_detected == 'true'
+        if: steps.conflict-handler.outputs.conflict_files != ''
         uses: peter-evans/create-pull-request@v4
         with:
-          title: "[冲突待解决] 合并 ${{ inputs.commit-hash }}"
+          title: "[冲突解决] ${{ inputs.commit-hash }} from ${{ inputs.target-repo }}"
           body: |
-            ## 需手动解决的冲突文件
-            $(echo ${{ steps.conflict-detector.outputs.conflict_files }} | tr ',' '\n' | sed 's/^/- `/; s/$/`/')
-            
-            **来源仓库**：[${{ inputs.target-repo }}@${{ inputs.commit-hash }}](https://github.com/${{ inputs.target-repo }}/commit/${{ inputs.commit-hash }})
-          branch: "merge-conflict/${{ inputs.commit-hash }}"
-          base: ${{ github.ref_name }}
+            ## 需要人工处理的冲突文件
+            ${{ format('{0}', steps.conflict-handler.outputs.conflict_files) | split(',') | map: '- `'+item+'`' | join('\n') }}
+
+            ### 来源信息
+            - 仓库：[${{ inputs.target-repo }}](https://github.com/${{ inputs.target-repo }})
+            - 提交：[{0}](https://github.com/${{ inputs.target-repo }}/commit/${{ inputs.commit-hash }})" >> $GITHUB_STEP_SUMMARY
+          branch: "conflict-resolution/${{ inputs.commit-hash }}"
           delete-branch: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 生成最终报告
+        run: |
+          if [ "${{ steps.conflict-handler.outputs.remaining }}" -gt 0 ]; then
+            echo "✅ 成功合并部分文件" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "${{ steps.conflict-handler.outputs.conflict_files }}" ]; then
+            echo "⚠️ 需要人工解决的冲突文件已创建PR" >> $GITHUB_STEP_SUMMARY
+          fi
