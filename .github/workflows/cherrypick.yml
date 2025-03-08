@@ -6,78 +6,83 @@ on:
       commit-hash:
         description: "目标提交哈希 (40位小写十六进制)"
         required: true
+        type: string
       target-repo:
         description: "来源仓库 (格式：owner/repo)"
         required: true
+        type: string
       target-branch:
         description: "目标分支"
         default: "main"
+        type: string
       git-username:
         description: "GitHub用户名"
         required: true
+        type: string
       git-password:
         description: "GitHub密码/PAT"
         required: true
-        sensitive: true
+        type: string
+        secrets: true
 
 jobs:
   smart-merge:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出仓库
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    - name: 检出仓库
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-      - name: 验证输入格式
-        run: |
-          if [[ ! "${{ inputs.target-repo }}" =~ ^[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$ ]]; then
-            echo "::error::仓库格式错误！示例：LKDenchin/kernel_rova_bpf"
-            exit 1
-          fi
-
-          if [[ ! "${{ inputs.commit-hash }}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::提交哈希格式错误！需要40位小写十六进制"
-            exit 1
-          fi
-
-      - name: 配置Git身份
-        run: |
-          git config --global user.name "GitHub Merge Bot"
-          git config --global user.email "merge-bot@noreply.github.com"
-
-      - name: 设置安全认证
-        run: |
-          set +x
-          echo "https://${{ inputs.git-username }}:${{ inputs.git-password }}@github.com" > ~/.git-credentials
-          chmod 600 ~/.git-credentials
-          git config --global credential.helper 'store --file ~/.git-credentials'
-
-      - name: 添加远程仓库
-        run: |
-          git remote remove upstream 2>/dev/null || true
-          git remote add upstream "https://github.com/${{ inputs.target-repo }}.git"
-
-      - name: 获取目标代码
-        run: |
-          git fetch upstream "${{ inputs.target-branch }}"
-          git fetch upstream "${{ inputs.commit-hash }}"
-
-      - name: 智能合并处理
-        id: merge-processor
-        run: |
-         commit_hash=${{ inputs.commit-hash }}
-         parents=$(git show -s --format=%P "$commit_hash")
-         if [ -z "$parents" ]; then
-           echo "提交 $commit_hash 没有父提交，无法处理。"
+    - name: 验证输入格式
+      run: |
+        if [[ ! "${{ inputs.target-repo }}" =~ ^[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$ ]]; then
+          echo "::error::仓库格式错误！示例：LKDenchin/kernel_rova_bpf"
           exit 1
-         fi
+        fi
+
+        if [[ ! "${{ inputs.commit-hash }}" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::提交哈希格式错误！需要40位小写十六进制"
+          exit 1
+        fi
+
+    - name: 配置Git身份
+      run: |
+        git config --global user.name "GitHub Merge Bot"
+        git config --global user.email "merge-bot@noreply.github.com"
+
+    - name: 设置安全认证
+      run: |
+        set +x
+        echo "https://${{ inputs.git-username }}:${{ inputs.git-password }}@github.com" > ~/.git-credentials
+        chmod 600 ~/.git-credentials
+        git config --global credential.helper 'store --file ~/.git-credentials'
+
+    - name: 添加远程仓库
+      run: |
+        git remote remove upstream 2>/dev/null || true
+        git remote add upstream "https://github.com/${{ inputs.target-repo }}.git"
+
+    - name: 获取目标代码
+      run: |
+        git fetch upstream "${{ inputs.target-branch }}"
+        git fetch upstream "${{ inputs.commit-hash }}"
+
+    - name: 智能合并处理
+      id: merge-processor
+      run: |
+        commit_hash=${{ inputs.commit-hash }}
+        parents=$(git show -s --format=%P "$commit_hash")
+        if [ -z "$parents" ]; then
+          echo "提交 $commit_hash 没有父提交，无法处理。"
+          exit 1
+        fi
 
         # 检查是否有多个父提交（如合并提交）
-          if [ $(echo "$parents" | wc -w) -gt 1 ]; then
-            echo "提交 $commit_hash 是一个合并提交，无法处理。"
+        if [ $(echo "$parents" | wc -w) -gt 1 ]; then
+          echo "提交 $commit_hash 是一个合并提交，无法处理。"
           exit 1
-         fi
+        fi
 
         # 检查提交是否已经在当前分支上
         if git branch --contains "$commit_hash" | grep -q 'main'; then
@@ -135,8 +140,7 @@ jobs:
         delete-branch: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_BRANCH: "merge-conflict/${{ inputs.commit-hash }}"
 
-      - name: 清理认证信息
-        if: always()
-        run: rm -f ~/.git-credentials
+    - name: 清理认证信息
+      if: always()
+      run: rm -f ~/.git-credentials
