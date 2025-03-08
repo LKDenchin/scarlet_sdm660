@@ -128,11 +128,11 @@ jobs:
           title: "[冲突解决] ${{ inputs.commit-hash }} from ${{ inputs.target-repo }}"
           body: |
             ## 需要人工处理的冲突文件
-            ${{ format('{0}', steps.conflict-handler.outputs.conflict_files) | split(',') | map: '- `'+item+'`' | join('\n') }}
+            ${{ fromJSON(format('["{0}"]', steps.conflict-handler.outputs.conflict_files)).map(item => '- `' + item + '`').join('\n') }}
 
             ### 来源信息
             - 仓库：[${{ inputs.target-repo }}](https://github.com/${{ inputs.target-repo }})
-            - 提交：[{0}](https://github.com/${{ inputs.target-repo }}/commit/${{ inputs.commit-hash }})" >> $GITHUB_STEP_SUMMARY
+            - 提交：[${{ inputs.commit-hash }}](https://github.com/${{ inputs.target-repo }}/commit/${{ inputs.commit-hash }})
           branch: "conflict-resolution/${{ inputs.commit-hash }}"
           delete-branch: true
         env:
