@@ -128,7 +128,7 @@ jobs:
           title: "[冲突解决] ${{ inputs.commit-hash }} from ${{ inputs.target-repo }}"
           body: |
             ## 需要人工处理的冲突文件
-            ${{ format('- `{0}`', join(split(steps.conflict-handler.outputs.conflict_files, ','), '`\n- `') }}
+            ${{ format('- `{0} `', join('`\n- `', split(steps.conflict-handler.outputs.conflict_files, ','))) }}
 
             ### 来源信息
             - 仓库：[${{ inputs.target-repo }}](https://github.com/${{ inputs.target-repo }})
