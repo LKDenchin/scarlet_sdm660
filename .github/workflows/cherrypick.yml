@@ -1,4 +1,5 @@
 name: 合并提交+自动PR
+
 on:
   workflow_dispatch:
     inputs:
@@ -127,7 +128,7 @@ jobs:
             **目标提交**: [${{ inputs.commit-hash }}](https://github.com/${{ inputs.target-repo }}/commit/${{ inputs.commit-hash }})
 
             ### 需要处理的冲突文件
-            ${{ join(split(steps.merge-processor.outputs.conflict_files, ','), '`\n- `') | replace(',', '\n- `') | prepend('- `') }}
+            ${{ steps.merge-processor.outputs.conflict_files | replace(',', '\n- `') | prepend('- `') }}
             
             ### 解决指南
             1. 检出本分支:
