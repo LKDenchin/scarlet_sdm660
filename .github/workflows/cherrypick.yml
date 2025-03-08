@@ -24,10 +24,10 @@ jobs:
   cherry-pick:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout仓库（完整历史）
+      - name: Checkout仓库（仅获取最新提交）
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 1  # 使用 1 只获取最新的提交
 
       - name: 配置安全环境
         run: |
@@ -38,12 +38,15 @@ jobs:
       - name: 添加动态远程仓库
         run: |
           git remote remove other-repo || true
-          git remote add other-repo "https://${{ inputs.target-repo }}.git"
+          git remote add other-repo "https://github.com/${{ inputs.target-repo }}.git"
 
       - name: 拉取目标分支
         run: |
-           git fetch --progress other-repo "${{ inputs.target-branch }}"
-           git fetch --progress other-repo "${{ inputs.target-commit }}" 
+          git fetch --progress other-repo refs/heads/${{ inputs.target-branch }}:refs/remotes/origin/${{ inputs.target-branch }}
+
+      - name: 拉取特定提交
+        run: |
+          git fetch --progress other-repo "${{ inputs.commit-hash }}"
 
       - name: 处理提交
         run: |
@@ -53,9 +56,9 @@ jobs:
             echo "处理提交: $commit"
             
             # 检查是否可以干净地应用提交
-            if git cherry-pick -n "$commit" 2>&1 | grep -q 'CONFLICT'; then
+            if ! git cherry-pick -n "$commit"; then
               echo "检测到冲突，跳过提交: $commit"
-              git cherry-pick --abort
+              git cherry-pick --abort || true  # 确保即使没有进行中的 cherry-pick 也不会报错
               continue
             fi
             
