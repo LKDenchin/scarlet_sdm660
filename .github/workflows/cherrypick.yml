@@ -32,8 +32,9 @@ jobs:
       # ================ 输入验证 ================
       - name: 验证输入格式
         run: |
-          if [[ ! "${{ inputs.target-repo }}" =~ ^[a-z0-9_-]+\/[a-z0-9_-]+$ ]]; then
-            echo "::error::仓库格式错误！示例：LKDenchin/kernel_rova_bpf"
+          # 仓库名格式校验
+          if [[ ! "${{ inputs.target-repo }}" =~ ^[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$ ]]; then
+            echo "::error::Invalid repo format: ${{ inputs.target-repo }}"
             exit 1
           fi
 
