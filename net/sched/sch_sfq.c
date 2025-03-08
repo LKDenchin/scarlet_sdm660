@@ -353,7 +353,7 @@ sfq_enqueue(struct sk_buff *skb, struct Qdisc *sch, struct sk_buff **to_free)
 	unsigned int hash, dropped;
 	sfq_index x, qlen;
 	struct sfq_slot *slot;
-	int ret;
+	int uninitialized_var(ret);
 	struct sk_buff *head;
 	int delta;
 

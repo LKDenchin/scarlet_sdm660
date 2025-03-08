@@ -1308,8 +1308,8 @@ static int sunxi_mmc_resource_request(struct sunxi_mmc_host *host,
 		return ret;
 
 	host->irq = platform_get_irq(pdev, 0);
-	if (host->irq < 0) {
-		ret = host->irq;
+	if (host->irq <= 0) {
+		ret = -EINVAL;
 		goto error_disable_mmc;
 	}
 

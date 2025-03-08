@@ -1255,9 +1255,13 @@ int bcm_qspi_probe(struct platform_device *pdev,
 		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 						   "mspi");
 
-	qspi->base[MSPI]  = devm_ioremap_resource(dev, res);
-	if (IS_ERR(qspi->base[MSPI]))
-		return PTR_ERR(qspi->base[MSPI]);
+	if (res) {
+		qspi->base[MSPI]  = devm_ioremap_resource(dev, res);
+		if (IS_ERR(qspi->base[MSPI]))
+			return PTR_ERR(qspi->base[MSPI]);
+	} else {
+		return 0;
+	}
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "bspi");
 	if (res) {

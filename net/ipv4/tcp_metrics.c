@@ -40,7 +40,7 @@ struct tcp_fastopen_metrics {
 
 struct tcp_metrics_block {
 	struct tcp_metrics_block __rcu	*tcpm_next;
-	struct net			*tcpm_net;
+	possible_net_t			tcpm_net;
 	struct inetpeer_addr		tcpm_saddr;
 	struct inetpeer_addr		tcpm_daddr;
 	unsigned long			tcpm_stamp;
@@ -51,38 +51,34 @@ struct tcp_metrics_block {
 	struct rcu_head			rcu_head;
 };
 
-static inline struct net *tm_net(const struct tcp_metrics_block *tm)
+static inline struct net *tm_net(struct tcp_metrics_block *tm)
 {
-	/* Paired with the WRITE_ONCE() in tcpm_new() */
-	return READ_ONCE(tm->tcpm_net);
+	return read_pnet(&tm->tcpm_net);
 }
 
 static bool tcp_metric_locked(struct tcp_metrics_block *tm,
 			      enum tcp_metric_index idx)
 {
-	/* Paired with WRITE_ONCE() in tcpm_suck_dst() */
-	return READ_ONCE(tm->tcpm_lock) & (1 << idx);
+	return tm->tcpm_lock & (1 << idx);
 }
 
-static u32 tcp_metric_get(const struct tcp_metrics_block *tm,
+static u32 tcp_metric_get(struct tcp_metrics_block *tm,
 			  enum tcp_metric_index idx)
 {
-	/* Paired with WRITE_ONCE() in tcp_metric_set() */
-	return READ_ONCE(tm->tcpm_vals[idx]);
+	return tm->tcpm_vals[idx];
 }
 
 static void tcp_metric_set(struct tcp_metrics_block *tm,
 			   enum tcp_metric_index idx,
 			   u32 val)
 {
-	/* Paired with READ_ONCE() in tcp_metric_get() */
-	WRITE_ONCE(tm->tcpm_vals[idx], val);
+	tm->tcpm_vals[idx] = val;
 }
 
 static bool addr_same(const struct inetpeer_addr *a,
 		      const struct inetpeer_addr *b)
 {
-	return (a->family == b->family) && !inetpeer_addr_cmp(a, b);
+	return inetpeer_addr_cmp(a, b) == 0;
 }
 
 struct tcpm_hash_bucket {
@@ -93,7 +89,6 @@ static struct tcpm_hash_bucket	*tcp_metrics_hash __read_mostly;
 static unsigned int		tcp_metrics_hash_log __read_mostly;
 
 static DEFINE_SPINLOCK(tcp_metrics_lock);
-static DEFINE_SEQLOCK(fastopen_seqlock);
 
 static void tcpm_suck_dst(struct tcp_metrics_block *tm,
 			  const struct dst_entry *dst,
@@ -102,7 +97,7 @@ static void tcpm_suck_dst(struct tcp_metrics_block *tm,
 	u32 msval;
 	u32 val;
 
-	WRITE_ONCE(tm->tcpm_stamp, jiffies);
+	tm->tcpm_stamp = jiffies;
 
 	val = 0;
 	if (dst_metric_locked(dst, RTAX_RTT))
@@ -115,42 +110,30 @@ static void tcpm_suck_dst(struct tcp_metrics_block *tm,
 		val |= 1 << TCP_METRIC_CWND;
 	if (dst_metric_locked(dst, RTAX_REORDERING))
 		val |= 1 << TCP_METRIC_REORDERING;
-	/* Paired with READ_ONCE() in tcp_metric_locked() */
-	WRITE_ONCE(tm->tcpm_lock, val);
+	tm->tcpm_lock = val;
 
 	msval = dst_metric_raw(dst, RTAX_RTT);
-	tcp_metric_set(tm, TCP_METRIC_RTT, msval * USEC_PER_MSEC);
+	tm->tcpm_vals[TCP_METRIC_RTT] = msval * USEC_PER_MSEC;
 
 	msval = dst_metric_raw(dst, RTAX_RTTVAR);
-	tcp_metric_set(tm, TCP_METRIC_RTTVAR, msval * USEC_PER_MSEC);
-	tcp_metric_set(tm, TCP_METRIC_SSTHRESH,
-		       dst_metric_raw(dst, RTAX_SSTHRESH));
-	tcp_metric_set(tm, TCP_METRIC_CWND,
-		       dst_metric_raw(dst, RTAX_CWND));
-	tcp_metric_set(tm, TCP_METRIC_REORDERING,
-		       dst_metric_raw(dst, RTAX_REORDERING));
+	tm->tcpm_vals[TCP_METRIC_RTTVAR] = msval * USEC_PER_MSEC;
+	tm->tcpm_vals[TCP_METRIC_SSTHRESH] = dst_metric_raw(dst, RTAX_SSTHRESH);
+	tm->tcpm_vals[TCP_METRIC_CWND] = dst_metric_raw(dst, RTAX_CWND);
+	tm->tcpm_vals[TCP_METRIC_REORDERING] = dst_metric_raw(dst, RTAX_REORDERING);
 	if (fastopen_clear) {
-		write_seqlock(&fastopen_seqlock);
 		tm->tcpm_fastopen.mss = 0;
 		tm->tcpm_fastopen.syn_loss = 0;
 		tm->tcpm_fastopen.try_exp = 0;
 		tm->tcpm_fastopen.cookie.exp = false;
 		tm->tcpm_fastopen.cookie.len = 0;
-		write_sequnlock(&fastopen_seqlock);
 	}
 }
 
 #define TCP_METRICS_TIMEOUT		(60 * 60 * HZ)
 
-static void tcpm_check_stamp(struct tcp_metrics_block *tm,
-			     const struct dst_entry *dst)
+static void tcpm_check_stamp(struct tcp_metrics_block *tm, struct dst_entry *dst)
 {
-	unsigned long limit;
-
-	if (!tm)
-		return;
-	limit = READ_ONCE(tm->tcpm_stamp) + TCP_METRICS_TIMEOUT;
-	if (unlikely(time_after(jiffies, limit)))
+	if (tm && unlikely(time_after(jiffies, tm->tcpm_stamp + TCP_METRICS_TIMEOUT)))
 		tcpm_suck_dst(tm, dst, false);
 }
 
@@ -191,23 +174,20 @@ static struct tcp_metrics_block *tcpm_new(struct dst_entry *dst,
 		oldest = deref_locked(tcp_metrics_hash[hash].chain);
 		for (tm = deref_locked(oldest->tcpm_next); tm;
 		     tm = deref_locked(tm->tcpm_next)) {
-			if (time_before(READ_ONCE(tm->tcpm_stamp),
-					READ_ONCE(oldest->tcpm_stamp)))
+			if (time_before(tm->tcpm_stamp, oldest->tcpm_stamp))
 				oldest = tm;
 		}
 		tm = oldest;
 	} else {
-		tm = kzalloc(sizeof(*tm), GFP_ATOMIC);
+		tm = kmalloc(sizeof(*tm), GFP_ATOMIC);
 		if (!tm)
 			goto out_unlock;
 	}
-	/* Paired with the READ_ONCE() in tm_net() */
-	WRITE_ONCE(tm->tcpm_net, net);
-
+	write_pnet(&tm->tcpm_net, net);
 	tm->tcpm_saddr = *saddr;
 	tm->tcpm_daddr = *daddr;
 
-	tcpm_suck_dst(tm, dst, reclaim);
+	tcpm_suck_dst(tm, dst, true);
 
 	if (likely(!reclaim)) {
 		tm->tcpm_next = tcp_metrics_hash[hash].chain;
@@ -451,7 +431,7 @@ void tcp_update_metrics(struct sock *sk)
 					       tp->reordering);
 		}
 	}
-	WRITE_ONCE(tm->tcpm_stamp, jiffies);
+	tm->tcpm_stamp = jiffies;
 out_unlock:
 	rcu_read_unlock();
 }
@@ -564,6 +544,8 @@ bool tcp_peer_is_proven(struct request_sock *req, struct dst_entry *dst)
 	return ret;
 }
 
+static DEFINE_SEQLOCK(fastopen_seqlock);
+
 void tcp_fastopen_cache_get(struct sock *sk, u16 *mss,
 			    struct tcp_fastopen_cookie *cookie)
 {
@@ -670,7 +652,7 @@ static int tcp_metrics_fill_info(struct sk_buff *msg,
 	}
 
 	if (nla_put_msecs(msg, TCP_METRICS_ATTR_AGE,
-			  jiffies - READ_ONCE(tm->tcpm_stamp),
+			  jiffies - tm->tcpm_stamp,
 			  TCP_METRICS_ATTR_PAD) < 0)
 		goto nla_put_failure;
 
@@ -681,7 +663,7 @@ static int tcp_metrics_fill_info(struct sk_buff *msg,
 		if (!nest)
 			goto nla_put_failure;
 		for (i = 0; i < TCP_METRIC_MAX_KERNEL + 1; i++) {
-			u32 val = tcp_metric_get(tm, i);
+			u32 val = tm->tcpm_vals[i];
 
 			if (!val)
 				continue;

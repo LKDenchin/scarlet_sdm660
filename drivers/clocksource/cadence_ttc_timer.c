@@ -23,8 +23,6 @@
 #include <linux/of_irq.h>
 #include <linux/slab.h>
 #include <linux/sched_clock.h>
-#include <linux/module.h>
-#include <linux/of_platform.h>
 
 /*
  * This driver configures the 2 16/32-bit count-up timers as follows:
@@ -474,7 +472,13 @@ out_kfree:
 	return err;
 }
 
-static int __init ttc_timer_probe(struct platform_device *pdev)
+/**
+ * ttc_timer_init - Initialize the timer
+ *
+ * Initializes the timer hardware and register the clock source and clock event
+ * timers with Linux kernal timer framework
+ */
+static int __init ttc_timer_init(struct device_node *timer)
 {
 	unsigned int irq;
 	void __iomem *timer_baseaddr;
@@ -482,7 +486,6 @@ static int __init ttc_timer_probe(struct platform_device *pdev)
 	static int initialized;
 	int clksel, ret;
 	u32 timer_width = 16;
-	struct device_node *timer = pdev->dev.of_node;
 
 	if (initialized)
 		return 0;
@@ -494,10 +497,10 @@ static int __init ttc_timer_probe(struct platform_device *pdev)
 	 * and use it. Note that the event timer uses the interrupt and it's the
 	 * 2nd TTC hence the irq_of_parse_and_map(,1)
 	 */
-	timer_baseaddr = devm_of_iomap(&pdev->dev, timer, 0, NULL);
-	if (IS_ERR(timer_baseaddr)) {
+	timer_baseaddr = of_iomap(timer, 0);
+	if (!timer_baseaddr) {
 		pr_err("ERROR: invalid timer base address\n");
-		return PTR_ERR(timer_baseaddr);
+		return -ENXIO;
 	}
 
 	irq = irq_of_parse_and_map(timer, 1);
@@ -521,40 +524,20 @@ static int __init ttc_timer_probe(struct platform_device *pdev)
 	clk_ce = of_clk_get(timer, clksel);
 	if (IS_ERR(clk_ce)) {
 		pr_err("ERROR: timer input clock not found\n");
-		ret = PTR_ERR(clk_ce);
-		goto put_clk_cs;
+		return PTR_ERR(clk_ce);
 	}
 
 	ret = ttc_setup_clocksource(clk_cs, timer_baseaddr, timer_width);
 	if (ret)
-		goto put_clk_ce;
+		return ret;
 
 	ret = ttc_setup_clockevent(clk_ce, timer_baseaddr + 4, irq);
 	if (ret)
-		goto put_clk_ce;
+		return ret;
 
 	pr_info("%s #0 at %p, irq=%d\n", timer->name, timer_baseaddr, irq);
 
 	return 0;
-
-put_clk_ce:
-	clk_put(clk_ce);
-put_clk_cs:
-	clk_put(clk_cs);
-	return ret;
 }
 
-static const struct of_device_id ttc_timer_of_match[] = {
-	{.compatible = "cdns,ttc"},
-	{},
-};
-
-MODULE_DEVICE_TABLE(of, ttc_timer_of_match);
-
-static struct platform_driver ttc_timer_driver = {
-	.driver = {
-		.name	= "cdns_ttc_timer",
-		.of_match_table = ttc_timer_of_match,
-	},
-};
-builtin_platform_driver_probe(ttc_timer_driver, ttc_timer_probe);
+TIMER_OF_DECLARE(ttc, "cdns,ttc", ttc_timer_init);

@@ -513,6 +513,7 @@ static int route4_change(struct net *net, struct sk_buff *in_skb,
 	if (fold) {
 		f->id = fold->id;
 		f->iif = fold->iif;
+		f->res = fold->res;
 		f->handle = fold->handle;
 
 		f->tp = fold->tp;

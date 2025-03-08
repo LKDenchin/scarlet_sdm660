@@ -1115,9 +1115,7 @@ int btrfs_quota_disable(struct btrfs_fs_info *fs_info)
 		goto end_trans;
 	}
 
-	spin_lock(&fs_info->trans_lock);
 	list_del(&quota_root->dirty_list);
-	spin_unlock(&fs_info->trans_lock);
 
 	btrfs_tree_lock(quota_root->node);
 	clean_tree_block(fs_info, quota_root->node);

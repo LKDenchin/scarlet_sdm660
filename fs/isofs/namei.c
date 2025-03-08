@@ -153,8 +153,8 @@ isofs_find_entry(struct inode *dir, struct dentry *dentry,
 struct dentry *isofs_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
 {
 	int found;
-	unsigned long block;
-	unsigned long offset;
+	unsigned long uninitialized_var(block);
+	unsigned long uninitialized_var(offset);
 	struct inode *inode;
 	struct page *page;
 

@@ -47,10 +47,12 @@ static struct integrity_iint_cache *__integrity_iint_find(struct inode *inode)
 		else if (inode > iint->inode)
 			n = n->rb_right;
 		else
-			return iint;
+			break;
 	}
+	if (!n)
+		return NULL;
 
-	return NULL;
+	return iint;
 }
 
 /*
@@ -115,15 +117,10 @@ struct integrity_iint_cache *integrity_inode_get(struct inode *inode)
 		parent = *p;
 		test_iint = rb_entry(parent, struct integrity_iint_cache,
 				     rb_node);
-		if (inode < test_iint->inode) {
+		if (inode < test_iint->inode)
 			p = &(*p)->rb_left;
-		} else if (inode > test_iint->inode) {
+		else
 			p = &(*p)->rb_right;
-		} else {
-			write_unlock(&integrity_iint_lock);
-			kmem_cache_free(iint_cache, iint);
-			return test_iint;
-		}
 	}
 
 	iint->inode = inode;
