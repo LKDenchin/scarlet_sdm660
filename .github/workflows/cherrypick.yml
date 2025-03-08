@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       commit-hash:
-        description: "目标提交的哈希值（可以是范围，如A..B）"
+        description: "目标提交的哈希值"
         required: true
       target-repo:
         description: "目标仓库的URL（格式：owner/repo）"
@@ -24,7 +24,7 @@ jobs:
   cherry-pick:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout仓库（仅获取最新提交）
+      - name: Checkout 仓库（仅获取最新提交）
         uses: actions/checkout@v4
         with:
           fetch-depth: 1  # 使用 1 只获取最新的提交
@@ -35,37 +35,38 @@ jobs:
           git config --global credential.helper 'store --file=.git-credentials'
           echo "https://${{ inputs.git-username }}:${{ inputs.git-password }}@github.com" > .git-credentials
 
-      - name: 添加动态远程仓库
+      - name: 添加目标远程仓库
         run: |
-          git remote remove other-repo || true
-          git remote add other-repo "https://github.com/${{ inputs.target-repo }}.git"
+          git remote add target-repo "https://github.com/${{ inputs.target-repo }}.git"
 
-      - name: 拉取目标分支
+      - name: 拉取目标提交
         run: |
-          git fetch --progress other-repo refs/heads/${{ inputs.target-branch }}:refs/remotes/origin/${{ inputs.target-branch }}
-
-      - name: 拉取特定提交
-        run: |
-          git fetch --progress other-repo "${{ inputs.commit-hash }}"
+          git fetch target-repo "${{ inputs.commit-hash }}"
 
       - name: 处理提交
         run: |
-          # 解析提交范围
-          commits=$(git log --format=%H --reverse --topo-order "${{ inputs.commit-hash }}")
-          for commit in $commits; do
-            echo "处理提交: $commit"
-            
-            # 检查是否可以干净地应用提交
-            if ! git cherry-pick -n "$commit"; then
-              echo "检测到冲突，跳过提交: $commit"
-              git cherry-pick --abort || true  # 确保即使没有进行中的 cherry-pick 也不会报错
-              continue
-            fi
-            
-            # 应用提交
-            git cherry-pick -m 1 "$commit"
-            git push origin HEAD:refs/heads/"${{ inputs.target-branch }}" --force-with-lease
-            
-            # 回滚到目标分支的最新状态，准备处理下一个提交
-            git reset --hard "other-repo/${{ inputs.target-branch }}"
-          done
+          # 应用提交
+          echo "处理提交: ${{ inputs.commit-hash }}"
+          if ! git cherry-pick -n "${{ inputs.commit-hash }}"; then
+            echo "检测到冲突，跳过提交: ${{ inputs.commit-hash }}"
+            git cherry-pick --abort || true  # 确保即使没有进行中的 cherry-pick 也不会报错
+          else
+            # 提交更改并推送到目标分支
+            git push origin HEAD:${{ inputs.target-branch }} --force-with-lease
+          fi
+
+      - name: 安装 GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh
+
+      - name: 登录 GitHub CLI
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: 创建 PR
+        run: |
+          # 创建 PR
+          git checkout -b cherry-pick-branch
+          git push origin cherry-pick-branch
+          gh pr create --base ${{ inputs.target-branch }} --head cherry-pick-branch --title "Cherry-pick: ${{ inputs.commit-hash }}" --body "Cherry-pick 处理的提交。"
