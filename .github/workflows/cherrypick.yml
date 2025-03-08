@@ -27,7 +27,7 @@ jobs:
       - name: Checkout仓库（完整历史）
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: 配置安全环境
         run: |
