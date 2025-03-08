@@ -122,18 +122,16 @@ jobs:
           git push origin HEAD
 
       - name: 创建冲突跟踪PR
-        if: steps.conflict-handler.outputs.conflict_files != ''
+        if: steps.merge-attempt.outputs.result == 'conflict'
         uses: peter-evans/create-pull-request@v4
         with:
-          title: "[冲突解决] ${{ inputs.commit-hash }} from ${{ inputs.target-repo }}"
+          title: "合并冲突需要处理 - ${{ inputs.commit-hash }}"
           body: |
-            ## 需要人工处理的冲突文件
-            ${{ format('- `{0}`', replace(replace(steps.conflict-handler.outputs.conflict_files, ',', '`\n- `'), '%0A', '\n')) }}
+            ## ⚠️ 检测到合并冲突
+            提交 ${{ inputs.commit-hash }} 与当前分支存在冲突，请检查文件差异。
 
-            ### 来源信息
-            - 仓库：[${{ inputs.target-repo }}](https://github.com/${{ inputs.target-repo }})
-            - 提交：[${{ inputs.commit-hash }}](https://github.com/${{ inputs.target-repo }}/commit/${{ inputs.commit-hash }})
-          branch: "conflict-resolution/${{ inputs.commit-hash }}"
+            **来源仓库**: [${{ inputs.target-repo }}](https://github.com/${{ inputs.target-repo }})
+          branch: "merge-conflict/${{ inputs.commit-hash }}"
           delete-branch: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
