@@ -17,7 +17,7 @@ struct fs_parameter {
 
 struct fs_context {
 	const struct fs_context_operations *ops;
-	struct file		*reference;
+	struct dentry		*reference;
 	struct dentry		*root;
 	struct user_namespace	*user_ns;
 	struct net		*net_ns;
@@ -56,12 +56,8 @@ struct fs_context_operations {
 	int (*reconfigure)(struct fs_context *fc);
 };
 
-/* For kernel 4.19: use legacy mount API to implement submount support */
-struct fuse_fs_context {
-	struct fuse_conn *fc;
-	struct fuse_mount *fm;
-	struct dentry *reference;
-};
+/* Kernel 4.19 compatibility: set_anon_super_fc doesn't exist */
+#define set_anon_super_fc set_anon_super
 
 static inline struct fs_context *fs_context_for_submount(struct file_system_type *type, struct dentry *reference)
 {
@@ -92,24 +88,11 @@ static inline struct super_block *sget_fc(struct fs_context *fc,
 					  int (*test)(struct super_block *, void *),
 					  int (*set)(struct super_block *, void *))
 {
-	struct fuse_fs_context *ctx = fc->s_fs_info;
 	struct super_block *sb;
-	int err;
 
 	sb = sget(fc->reference->d_sb->s_type, test, set, SB_NOSEC, NULL);
 	if (IS_ERR(sb))
 		return sb;
-
-	if (!sb->s_root) {
-		err = 0;
-	} else {
-		err = -EBUSY;
-	}
-
-	if (err) {
-		deactivate_locked_super(sb);
-		return ERR_PTR(err);
-	}
 
 	return sb;
 }
