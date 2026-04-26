@@ -954,6 +954,14 @@ static inline u64 get_node_id(struct inode *inode)
 	return get_fuse_inode(inode)->nodeid;
 }
 
+/* Kernel 4.19 compatibility: inode_wrong_type doesn't exist */
+#ifndef inode_wrong_type
+static inline bool inode_wrong_type(const struct inode *inode, umode_t mode)
+{
+	return inode->i_mode & S_IFMT != (mode & S_IFMT);
+}
+#endif
+
 static inline bool fuse_stale_inode(const struct inode *inode, int generation,
 				    struct fuse_attr *attr)
 {
