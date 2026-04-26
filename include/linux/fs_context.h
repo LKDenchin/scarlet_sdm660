@@ -10,6 +10,11 @@
 #include <linux/mount.h>
 #include <linux/slab.h>
 
+struct fs_parameter {
+	const char *key;
+	const char *string;
+};
+
 struct fs_context {
 	const struct fs_context_operations *ops;
 	struct file		*reference;
@@ -51,20 +56,81 @@ struct fs_context_operations {
 	int (*reconfigure)(struct fs_context *fc);
 };
 
+/* For kernel 4.19: use legacy mount API to implement submount support */
+struct fuse_fs_context {
+	struct fuse_conn *fc;
+	struct fuse_mount *fm;
+	struct dentry *reference;
+};
+
 static inline struct fs_context *fs_context_for_submount(struct file_system_type *type, struct dentry *reference)
 {
-	return ERR_PTR(-EOPNOTSUPP);
+	struct fs_context *fc;
+
+	fc = kzalloc(sizeof(*fc), GFP_KERNEL);
+	if (!fc)
+		return ERR_PTR(-ENOMEM);
+
+	fc->reference = dget(reference);
+	fc->need_free = true;
+	return fc;
 }
 
 static inline void put_fs_context(struct fs_context *fc)
 {
-	if (fc && fc->need_free)
-		kfree(fc);
+	if (fc) {
+		if (fc->root)
+			dput(fc->root);
+		if (fc->reference)
+			dput(fc->reference);
+		if (fc->need_free)
+			kfree(fc);
+	}
+}
+
+static inline struct super_block *sget_fc(struct fs_context *fc,
+					  int (*test)(struct super_block *, void *),
+					  int (*set)(struct super_block *, void *))
+{
+	struct fuse_fs_context *ctx = fc->s_fs_info;
+	struct super_block *sb;
+	int err;
+
+	sb = sget(fc->reference->d_sb->s_type, test, set, SB_NOSEC, NULL);
+	if (IS_ERR(sb))
+		return sb;
+
+	if (!sb->s_root) {
+		err = 0;
+	} else {
+		err = -EBUSY;
+	}
+
+	if (err) {
+		deactivate_locked_super(sb);
+		return ERR_PTR(err);
+	}
+
+	return sb;
 }
 
 static inline struct vfsmount *vfs_create_mount(struct fs_context *fc)
 {
-	return ERR_PTR(-EOPNOTSUPP);
+	struct vfsmount *mnt;
+
+	if (!fc->root)
+		return ERR_PTR(-EINVAL);
+
+	mnt = vfs_kern_mount(fc->reference->d_sb->s_type, 0,
+			     fc->reference->d_sb->s_type->name, NULL);
+	if (IS_ERR(mnt))
+		return mnt;
+
+	/* Replace the root dentry */
+	dput(mnt->mnt_root);
+	mnt->mnt_root = dget(fc->root);
+
+	return mnt;
 }
 
 #endif /* _LINUX_FS_CONTEXT_H */
