@@ -958,7 +958,7 @@ static inline u64 get_node_id(struct inode *inode)
 #ifndef inode_wrong_type
 static inline bool inode_wrong_type(const struct inode *inode, umode_t mode)
 {
-	return inode->i_mode & S_IFMT != (mode & S_IFMT);
+	return (inode->i_mode & S_IFMT) != (mode & S_IFMT);
 }
 #endif
 

@@ -207,6 +207,11 @@ static inline bool iter_is_iovec(const struct iov_iter *i)
 	return !(i->type & (ITER_BVEC | ITER_KVEC | ITER_PIPE));
 }
 
+static inline bool iov_iter_is_kvec(const struct iov_iter *i)
+{
+	return i->type & ITER_KVEC;
+}
+
 /*
  * Get one of READ or WRITE out of iter->type without any other flags OR'd in
  * with it.

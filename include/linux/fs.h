@@ -3684,4 +3684,12 @@ static inline int inode_drain_writes(struct inode *inode)
 	return filemap_write_and_wait(inode->i_mapping);
 }
 
+/* Kernel 4.19 compatibility: generic_copy_file_range helper */
+static inline ssize_t generic_copy_file_range(struct file *file_in, loff_t pos_in,
+					      struct file *file_out, loff_t pos_out,
+					      size_t len, unsigned int flags)
+{
+	return -EOPNOTSUPP;
+}
+
 #endif /* _LINUX_FS_H */

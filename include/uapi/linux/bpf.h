@@ -4974,6 +4974,9 @@ struct bpf_func_info {
 	__u32	type_id;
 };
 
+/* Kernel 4.19 compatibility: insn_off was called insn_offset */
+#define insn_offset insn_off
+
 #define BPF_LINE_INFO_LINE_NUM(line_col)	((line_col) >> 10)
 #define BPF_LINE_INFO_LINE_COL(line_col)	((line_col) & 0x3ff)
 
